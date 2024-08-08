@@ -4,6 +4,7 @@
 #include "AllocMan.h"
 #include "Autopunch.h"
 #include "PatchUtils.h"
+#include "Rollback_tests.h"
 #include <squirrel.h>
 
 #include "util.h"
@@ -17,9 +18,10 @@ void GetSqVM(){
     VM = (HSQUIRRELVM*)0x4DACE4_R; 
 }
 
-#define sq_vm_malloc_call_addr (0x186745_R)
-#define sq_vm_realloc_call_addr (0x18675A_R)
-#define sq_vm_free_call_addr (0x186737_R)
+// #define sq_vm_malloc_call_addr (0x186745_R)
+// #define sq_vm_realloc_call_addr (0x18675A_R)
+// #define sq_vm_free_call_addr (0x186737_R)
+
 
 #define closesocketA_call_addr (0x170383_R)
 #define closesocketB_call_addr (0x1703ee_R)
@@ -27,6 +29,21 @@ void GetSqVM(){
 #define sendto_call_addr (0x170502_R)
 #define recvfrom_call_addr (0x170e5b_R)
 
+
+#define malloc_base_addr (0x312D61_R)
+#define calloc_base_addr (0x3122EA_R)
+#define realloc_base_addr (0x312DAF_R)
+#define free_base_addr (0x312347_R)
+
+void patch_allocman(){
+    // hotpatch_rel32((void*)sq_vm_malloc_call_addr, (void*)my_malloc);
+    // hotpatch_rel32((void*)sq_vm_realloc_call_addr, (void*)my_realloc);
+    // hotpatch_rel32((void*)sq_vm_free_call_addr, (void*)my_free);
+    hotpatch_jump((void*)malloc_base_addr, (void*)my_malloc);
+    hotpatch_jump((void*)calloc_base_addr, (void*)my_calloc);
+    hotpatch_jump((void*)realloc_base_addr, (void*)my_realloc);
+    hotpatch_jump((void*)free_base_addr, (void*)my_free);
+}
 
 void Cleanup()
 {
@@ -51,17 +68,12 @@ void patch_autopunch(){
     autopunch_init();
 }
 
-void patch_allocman(){
-    hotpatch_rel32((void*)sq_vm_malloc_call_addr, (void*)my_malloc);
-    hotpatch_rel32((void*)sq_vm_realloc_call_addr, (void*)my_realloc);
-    hotpatch_rel32((void*)sq_vm_free_call_addr, (void*)my_free);
-}
 
 // Initialization code shared by th155r and thcrap use
 // Executes before the start of the process
 void common_init() {
     Debug();
-    //patch_allocman();
+    patch_allocman();
     //patch_autopunch();
 
 }
@@ -91,6 +103,7 @@ extern "C"
     // so that code is unnecessary to include here.
     __declspec(dllexport) void cdecl netcode_mod_init(void* param) {
         common_init();
+        rollback_test_mod_init();
     }
     
     // thcrap plugin init

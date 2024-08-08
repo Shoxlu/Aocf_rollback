@@ -12,8 +12,8 @@
 using rollback_timer_t = UBitIntType<std::bit_width(SAVED_FRAMES)>;
 
 struct AllocNode {
-    AllocNode* next = 0;
-    AllocNode* prev = 0;
+    AllocNode* next;
+    AllocNode* prev;
 
     void prepend(AllocNode* new_node) {
         new_node->next = this;
@@ -124,6 +124,7 @@ inline void AllocData::rollback(size_t frames, SavedAlloc* saved_alloc) {
     this->rollback_tag = true;
     memcpy(this->data, saved_alloc->data, saved_alloc->size);
 }
+extern size_t true_numberAllocs;
 
 struct AllocManager {
     static inline constexpr size_t FRAME_WRAP_MASK = SAVED_FRAMES - 1;
@@ -134,12 +135,6 @@ struct AllocManager {
     uint8_t* saved_data[SAVED_FRAMES];
     size_t filled_sizes[SAVED_FRAMES];
     size_t buffer_sizes[SAVED_FRAMES];
-    void print_nodes(){
-        for_each_alloc([](AllocData *data)
-                       { printf("Node: %x , prev_node: %x, next_node %x\n",data,
-                        ((AllocNode*)data)->prev, 
-                        ((AllocNode*)data)->next); });
-    }
 
     constexpr AllocManager()
         : saved_data_index(0), available_frames(0), saved_data{}, buffer_sizes{}, filled_sizes{} 
@@ -185,23 +180,25 @@ struct AllocManager {
 
     template <typename L>
     inline void for_each_alloc(const L& lambda) {
+       // printf("Entering for_each_alloc \n");
         AllocNode* node = this->dummy_node.next;
-        size_t n = 0;
         for (AllocNode* next_node; node != &this->dummy_node; node = next_node) {
-           // printf("node: %x \n", node);
             next_node = node->next;
             lambda((AllocData*)node);
-            n++;
         }
-        printf("Number of Nodes: %d\n", n);
     }
 
     template <typename L>
     inline void for_each_saved_alloc(size_t index, const L& lambda) {
+       // printf("Entering for_each_saved_alloc \n");
         uint8_t* buffer = this->saved_data[index];
         uint8_t* buffer_end = buffer + this->filled_sizes[index];
         while (buffer < buffer_end) {
             SavedAlloc* saved_data = (SavedAlloc*)buffer;
+            if(saved_data == nullptr){
+                printf("Saved data was null ! \n");
+                print_buffer_sizes();
+            }
             buffer += saved_data->total_size();
             lambda(saved_data);
         }
@@ -209,33 +206,53 @@ struct AllocManager {
 
     void tick() {
         size_t total_size = 0;
+        size_t n = 0;
+        size_t n2 = 0;
+        size_t n3 = 0;
         this->for_each_alloc([&](AllocData* alloc) {
             switch (alloc->tick()) {
                 case SaveData:
+                    n2++;
                     total_size += SavedAlloc::buffer_size(alloc);
                     break;
                 case FreeData:
+                    n3++;
                     alloc->cleanup();
+
                     free(alloc);
                     break;
             }
+            n++;
         });
+        printf("Number of ticked alloc: %d, Number of saved alloc: %d, Number of freed alloc: %d, Number of known allocs: %d, \n", 
+            n,
+            n2,
+            n3,
+            true_numberAllocs);
         size_t current_index = this->increment_index();
+        printf("Current Index: %d \n", current_index);
         this->filled_sizes[current_index] = total_size;
         uint8_t* current_buffer = this->saved_data[current_index];
         if (total_size > this->buffer_sizes[current_index]) {
+            printf("Will realloc, total_size rn: %d , buffersize: %d\n", total_size, this->buffer_sizes[current_index]);
             this->buffer_sizes[current_index] = total_size;
-            this->saved_data[current_index] = current_buffer = (uint8_t*)realloc(current_buffer, total_size);
+            free(this->saved_data[current_index]);
+            this->saved_data[current_index] = (uint8_t*)malloc(total_size);
+            current_buffer = this->saved_data[current_index];
         }
         uint8_t* buffer_write = current_buffer;
         this->for_each_alloc([&](AllocData* alloc) {
             SavedAlloc* saved_data = (SavedAlloc*)buffer_write;
             if(saved_data == nullptr){
+                printf("Saved data was null ! \n");
                 print_buffer_sizes();
+
             }
+            
             buffer_write += SavedAlloc::buffer_size(alloc);
             saved_data->record(alloc);
         });
+        print_buffer_sizes();
     }
     
     size_t rollback(size_t frames) {
@@ -244,6 +261,9 @@ struct AllocManager {
             size_t index = this->rollback_index(frames);
             this->for_each_saved_alloc(index, [=](SavedAlloc* saved_data) {
                 AllocData* alloc = saved_data->ptr;
+                if(alloc == nullptr){
+                    printf("alloc was null \n");
+                }
                 alloc->rollback(frames, saved_data);
             });
             // Any allocations without a rollback tag set
@@ -254,6 +274,7 @@ struct AllocManager {
                     alloc->rollback_tag = false;
                 } else {
                     alloc->cleanup();
+                    true_numberAllocs--;
                     free(alloc);
                 }
             });
@@ -265,12 +286,10 @@ struct AllocManager {
 static AllocManager alloc_man;
 
 void free_alloc(AllocData* alloc) {
-    printf("Free \n");
-    printf("Node to be freed %x, next %x, prev %x \n", alloc, alloc->node.next, alloc->node.prev);
+
     if (alloc->has_record) {
         alloc->start_free(SAVED_FRAMES);
     } else {
-       
         alloc->cleanup();
 
         free(alloc);
@@ -284,6 +303,7 @@ void tick_allocs() {
 }
 
 size_t __fastcall rollback_allocs(size_t frames) {
+    printf("Rollback, n_ticks rollbacked : %d \n", frames);
     return alloc_man.rollback(frames);
 }
 
@@ -292,27 +312,20 @@ void reset_rollback_buffers() {
 }
 
 void* cdecl my_malloc(size_t size) {
-    printf("Malloc  \n");
     AllocData* real_alloc = (AllocData*)malloc(AllocData::buffer_size(size));
     real_alloc->init(size);
     alloc_man.append(real_alloc);
-    printf("Node allocated %x, next %x, prev %x \n", real_alloc, real_alloc->node.next, real_alloc->node.prev);
-    //alloc_man.print_nodes();
     return &real_alloc->data;
 }
 
 void cdecl my_free(void* ptr) {
     if (ptr) {
-
         AllocData* real_alloc = AllocData::get_from_ptr(ptr);
         free_alloc(real_alloc);
-
-        //alloc_man.print_nodes();
     }
 }
 
 void* cdecl my_realloc(void* ptr, size_t new_size) {
-    printf("Realloc \n");
     if (ptr) {
         AllocData* real_alloc = AllocData::get_from_ptr(ptr);
         if (new_size) {
@@ -326,20 +339,10 @@ void* cdecl my_realloc(void* ptr, size_t new_size) {
                     free_alloc(real_alloc);
                 }
             }
-            printf("End Realloc \n");
             return ptr;
         }
-        printf("End Realloc \n");
         free_alloc(real_alloc);
         return NULL;
     }
-    printf("End Realloc \n");
     return my_malloc(new_size);
-}
-
-void* __cdecl my_calloc(size_t num, size_t size) {
-    size_t total_size = num * size;
-    void* ret = my_malloc(total_size);
-    memset(ret, 0, total_size);
-    return ret;
 }
