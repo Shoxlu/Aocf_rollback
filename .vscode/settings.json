@@ -43,20 +43,7 @@
         "stdexcept": "cpp",
         "streambuf": "cpp",
         "typeinfo": "cpp",
-        "xutility": "cpp",
-        "xstring": "cpp",
-        "*.rh": "cpp",
         "charconv": "cpp",
-        "xmemory": "cpp",
-        "ios": "cpp",
-        "xiosbase": "cpp",
-        "xtree": "cpp",
-        "format": "cpp",
-        "locale": "cpp",
-        "xlocale": "cpp",
-        "xlocinfo": "cpp",
-        "xlocmon": "cpp",
-        "xlocnum": "cpp",
-        "xloctime": "cpp"
+        "xmemory": "cpp"
     }
 }

@@ -1,4 +1,4 @@
 *.exe
 *.dll
-/TestAllocMan/.vs
-/.vscode
+/tools/*.exe
+/tools/*.run
